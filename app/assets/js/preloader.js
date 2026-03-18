@@ -8,7 +8,7 @@ const { DistroAPI }  = require('./distromanager')
 const LangLoader     = require('./langloader')
 const { LoggerUtil } = require('helios-core')
 // eslint-disable-next-line no-unused-vars
-const { HeliosDistribution } = require('helios-core/common')
+const { EmeraldDistribution } = require('helios-core/common')
 
 const logger = LoggerUtil.getLogger('Preloader')
 
@@ -27,7 +27,7 @@ LangLoader.setupLanguage()
 
 /**
  * 
- * @param {HeliosDistribution} data 
+ * @param {EmeraldDistribution} data 
  */
 function onDistroLoad(data){
     if(data != null){
