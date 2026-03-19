@@ -4,8 +4,9 @@
 title = "Emerald Launcher"
 
 [ejs.landing]
-mediaGitHubURL = "https://www.tiktok.com/@gameofarkadia"
+mediaGitHubURL = "https://www.gameofarkadia.net"
 mediaXURL = "https://x.com/GameOfArkadia"
+mediaTikTokURL = "https://www.tiktok.com/@gameofarkadia"
 mediaInstagramURL = "https://www.instagram.com/gameofarkadia/"
 mediaYouTubeURL = "https://www.youtube.com/@gameofarkadia"
 mediaDiscordURL = "https://discord.gg/gameofarkadia"

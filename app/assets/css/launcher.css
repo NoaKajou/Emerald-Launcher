@@ -3145,6 +3145,15 @@ input:checked + .toggleSwitchSlider:before {
     fill: #090909;
 }
 
+/* TikTok icon colors. */
+#tiktokSVG:hover,
+#tiktokURL:focus #tiktokSVG {
+    fill: #000000;
+}
+#tiktokSVG:active {
+    fill: #090909;
+}
+
 /* Instagram icon colors. */
 #instagramSVG:hover,
 #instagramURL:focus #instagramSVG {
