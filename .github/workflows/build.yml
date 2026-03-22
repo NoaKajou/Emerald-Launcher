@@ -21,6 +21,15 @@ jobs:
       - name: Check out Git repository
         uses: actions/checkout@v6
 
+      - name: Create GitHub Release
+        if: matrix.os == 'ubuntu-latest'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
@@ -38,6 +47,6 @@ jobs:
       - name: Build and Publish Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run dist -- --publish always
+        run: npm run dist -- --publish ${{ matrix.os == 'ubuntu-latest' && 'always' || 'never' }}
         shell: bash
 
