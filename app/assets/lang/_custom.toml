@@ -12,8 +12,8 @@ mediaYouTubeURL = "https://www.youtube.com/@gameofarkadia"
 mediaDiscordURL = "https://discord.gg/gameofarkadia"
 
 [ejs.settings]
-sourceGithubLink = "https://github.com/dscalZi/EmeraldLauncher"
-supportLink = "https://github.com/dscalZi/EmeraldLauncher/issues"
+sourceGithubLink = "https://github.com/NoaKajou/Emerald-Launcher"
+supportLink = "https://github.com/NoaKajou/Emerald-Launcher/issues"
 
 [ejs.welcome]
 welcomeHeader = "Bienvenue sur le launcher"

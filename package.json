@@ -3,11 +3,11 @@
   "version": "2.2.1",
   "productName": "Emerald Launcher",
   "description": "Modded Minecraft Launcher",
-  "author": "Daniel Scalzi (https://github.com/dscalzi/)",
+  "author": "Daniel Scalzi (https://github.com/NoaKajou/)",
   "license": "UNLICENSED",
-  "homepage": "https://github.com/dscalzi/EmeraldLauncher",
+  "homepage": "https://github.com/NoaKajou/EmeraldLauncher",
   "bugs": {
-    "url": "https://github.com/dscalzi/EmeraldLauncher/issues"
+    "url": "https://github.com/NoaKajou/EmeraldLauncher/issues"
   },
   "private": true,
   "main": "index.js",
