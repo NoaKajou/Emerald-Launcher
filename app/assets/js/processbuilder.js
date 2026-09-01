@@ -35,6 +35,7 @@ class ProcessBuilder {
         this.fmlDir = path.join(this.gameDir, 'forgeModList.json')
         this.llDir = path.join(this.gameDir, 'liteloaderModList.json')
         this.libPath = path.join(this.commonDir, 'libraries')
+        this.isVersionOnly = distroServer.rawServer.versionOnly === true || distroServer.modules.length === 0
 
         this.usingLiteLoader = false
         this.usingFabricLoader = false
@@ -46,17 +47,19 @@ class ProcessBuilder {
      */
     build(){
         fs.ensureDirSync(this.gameDir)
-        const tempNativePath = path.join(os.tmpdir(), ConfigManager.getTempNativeFolder(), crypto.pseudoRandomBytes(16).toString('hex'))
+        const tempNativePath = path.join(os.tmpdir(), ConfigManager.getTempNativeFolder(), crypto.pseudoRandomBytes(16).toString('hex'), 'java')
+        fs.ensureDirSync(tempNativePath)
         process.throwDeprecation = true
         this.setupLiteLoader()
         logger.info('Using liteloader:', this.usingLiteLoader)
         this.usingFabricLoader = this.server.modules.some(mdl => mdl.rawModule.type === Type.Fabric)
         logger.info('Using fabric loader:', this.usingFabricLoader)
-        const modObj = this.resolveModConfiguration(ConfigManager.getModConfiguration(this.server.rawServer.id).mods, this.server.modules)
+        const serverModConfig = ConfigManager.getModConfiguration(this.server.rawServer.id)
+        const modObj = this.resolveModConfiguration(serverModConfig != null ? serverModConfig.mods : {}, this.server.modules)
         
         // Mod list below 1.13
         // Fabric only supports 1.14+
-        if(!mcVersionAtLeast('1.13', this.server.rawServer.minecraftVersion)){
+        if(!this.isVersionOnly && !mcVersionAtLeast('1.13', this.server.rawServer.minecraftVersion)){
             this.constructJSONModList('forge', modObj.fMods, true)
             if(this.usingLiteLoader){
                 this.constructJSONModList('liteloader', modObj.lMods, true)
@@ -346,11 +349,69 @@ class ProcessBuilder {
      * @param {string} tempNativePath The path to store the native libraries.
      * @returns {Array.<string>} An array containing the full JVM arguments for this process.
      */
+    _getJavaMajorVersion(){
+        const candidates = []
+        const configured = ConfigManager.getJavaExecutable(this.server.rawServer.id)
+        if(configured){
+            candidates.push(configured)
+        }
+        candidates.push('java')
+
+        for(const javaExec of candidates){
+            try {
+                const output = child_process.execFileSync(javaExec, ['-version'], {
+                    encoding: 'utf8',
+                    stdio: ['ignore', 'pipe', 'pipe']
+                })
+                const match = /version\s+"?(?:1\.)?(\d+)/i.exec(output)
+                if(match){
+                    return Number.parseInt(match[1], 10)
+                }
+            } catch (err) {
+                logger.debug('Unable to detect Java version from executable:', javaExec, err.message)
+            }
+        }
+
+        return null
+    }
+
+    _filterJvmArgsForJavaCompatibility(args){
+        const javaMajor = this._getJavaMajorVersion()
+
+        return args.filter(arg => {
+            if(typeof arg !== 'string'){
+                return true
+            }
+
+            if(javaMajor != null){
+                if(javaMajor < 21 && arg.includes('--enable-native-access=')){
+                    return false
+                }
+
+                if(javaMajor < 22 && arg.includes('--sun-misc-unsafe-memory-access=')){
+                    return false
+                }
+            }
+
+            if(arg.includes('--enable-native-access=')){
+                return false
+            }
+
+            if(arg.includes('--sun-misc-unsafe-memory-access=')){
+                return false
+            }
+
+            return true
+        })
+    }
+
     constructJVMArguments(mods, tempNativePath){
         if(mcVersionAtLeast('1.13', this.server.rawServer.minecraftVersion)){
-            return this._constructJVMArguments113(mods, tempNativePath)
+            const rawArgs = this._constructJVMArguments113(mods, tempNativePath)
+            return this._filterJvmArgsForJavaCompatibility(rawArgs)
         } else {
-            return this._constructJVMArguments112(mods, tempNativePath)
+            const rawArgs = this._constructJVMArguments112(mods, tempNativePath)
+            return this._filterJvmArgsForJavaCompatibility(rawArgs)
         }
     }
 
@@ -622,6 +683,10 @@ class ProcessBuilder {
             mcArgs.push('--height')
             mcArgs.push(ConfigManager.getGameHeight())
         }
+
+        if(this.isVersionOnly){
+            return mcArgs
+        }
         
         // Mod List File Argument
         mcArgs.push('--modListFile')
@@ -643,6 +708,38 @@ class ProcessBuilder {
         }
 
         return mcArgs
+    }
+
+    /**
+     * Resolve the local client jar path for the current vanilla version.
+     * Modern Minecraft versions can place the client jar under different
+     * layouts than the legacy versions/<id>/<id>.jar convention.
+     *
+     * @returns {string} The resolved jar path.
+     */
+    _getVanillaJarPath() {
+        const version = this.vanillaManifest.id
+        const commonDir = this.commonDir
+        const candidates = []
+
+        if(this.vanillaManifest.downloads?.client?.path){
+            candidates.push(path.join(commonDir, this.vanillaManifest.downloads.client.path))
+        }
+
+        candidates.push(
+            path.join(commonDir, 'versions', version, `${version}.jar`),
+            path.join(commonDir, 'versions', version, `${version}-client.jar`),
+            path.join(commonDir, 'libraries', 'com', 'mojang', 'minecraft', version, `${version}.jar`),
+            path.join(commonDir, 'libraries', 'com', 'mojang', 'minecraft', version, `${version}-client.jar`)
+        )
+
+        for(const candidate of candidates){
+            if(fs.existsSync(candidate)){
+                return candidate
+            }
+        }
+
+        return candidates[0] ?? path.join(commonDir, 'versions', version, `${version}.jar`)
     }
 
     /**
@@ -675,11 +772,11 @@ class ProcessBuilder {
     classpathArg(mods, tempNativePath){
         let cpArgs = []
 
-        if(!mcVersionAtLeast('1.17', this.server.rawServer.minecraftVersion) || this.usingFabricLoader) {
-            // Add the version.jar to the classpath.
-            // Must not be added to the classpath for Forge 1.17+.
-            const version = this.vanillaManifest.id
-            cpArgs.push(path.join(this.commonDir, 'versions', version, version + '.jar'))
+        if(this.isVersionOnly || !mcVersionAtLeast('1.17', this.server.rawServer.minecraftVersion) || this.usingFabricLoader) {
+            // Add the version jar to the classpath.
+            // Some modern Minecraft layouts do not use the legacy
+            // versions/<id>/<id>.jar path, so resolve it dynamically.
+            cpArgs.push(this._getVanillaJarPath())
         }
         
 
@@ -750,11 +847,9 @@ class ProcessBuilder {
 
                         // Extract the file.
                         if(!shouldExclude){
-                            fs.writeFile(path.join(tempNativePath, fileName), zipEntries[i].getData(), (err) => {
-                                if(err){
-                                    logger.error('Error while extracting native library:', err)
-                                }
-                            })
+                            const outputPath = path.join(tempNativePath, fileName)
+                            fs.ensureDirSync(path.dirname(outputPath))
+                            fs.writeFileSync(outputPath, zipEntries[i].getData())
                         }
 
                     }
@@ -801,11 +896,9 @@ class ProcessBuilder {
 
                         // Extract the file.
                         if(!shouldExclude){
-                            fs.writeFile(path.join(tempNativePath, extractName), zipEntries[i].getData(), (err) => {
-                                if(err){
-                                    logger.error('Error while extracting native library:', err)
-                                }
-                            })
+                            const outputPath = path.join(tempNativePath, extractName)
+                            fs.ensureDirSync(path.dirname(outputPath))
+                            fs.writeFileSync(outputPath, zipEntries[i].getData())
                         }
 
                     }

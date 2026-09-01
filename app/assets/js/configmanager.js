@@ -80,6 +80,7 @@ const DEFAULT_CONFIG = {
         game: {
             resWidth: 1280,
             resHeight: 720,
+            selectedVersion: '1.20.1',
             fullscreen: false,
             autoConnect: true,
             launchDetached: true
@@ -701,6 +702,27 @@ exports.getGameHeight = function(def = false){
  */
 exports.setGameHeight = function(resHeight){
     config.settings.game.resHeight = Number.parseInt(resHeight)
+}
+
+/**
+ * Retrieve the selected Minecraft game version.
+ *
+ * @param {boolean} def Optional. If true, the default value will be returned.
+ * @returns {string} The selected Minecraft game version.
+ */
+exports.getGameVersion = function(def = false){
+    return !def ? config.settings.game.selectedVersion : DEFAULT_CONFIG.settings.game.selectedVersion
+}
+
+/**
+ * Set the selected Minecraft game version.
+ *
+ * @param {string} version The new selected game version.
+ */
+exports.setGameVersion = function(version){
+    config.settings.game.selectedVersion = typeof version === 'string' && version.trim().length > 0
+        ? version.trim()
+        : DEFAULT_CONFIG.settings.game.selectedVersion
 }
 
 /**

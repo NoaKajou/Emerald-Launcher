@@ -16,7 +16,9 @@ const {
     FullRepair,
     DistributionIndexProcessor,
     MojangIndexProcessor,
-    downloadFile
+    downloadFile,
+    downloadQueue,
+    getExpectedDownloadSize
 }                             = require('helios-core/dl')
 const {
     validateSelectedJvm,
@@ -239,6 +241,23 @@ const refreshServerStatus = async (fade = false) => {
     loggerLanding.info('Refreshing Server Status')
     const serv = (await DistroAPI.getDistribution()).getServerById(ConfigManager.getSelectedServer())
 
+    if(isVersionOnlyServer(serv)){
+        const pLabel = 'Mode'
+        const pVal = `Solo ${serv.rawServer.minecraftVersion}`
+
+        if(fade){
+            $('#server_status_wrapper').fadeOut(250, () => {
+                document.getElementById('landingPlayerLabel').innerHTML = pLabel
+                document.getElementById('player_count').innerHTML = pVal
+                $('#server_status_wrapper').fadeIn(500)
+            })
+        } else {
+            document.getElementById('landingPlayerLabel').innerHTML = pLabel
+            document.getElementById('player_count').innerHTML = pVal
+        }
+        return
+    }
+
     let pLabel = Lang.queryJS('landing.serverStatus.server')
     let pVal = Lang.queryJS('landing.serverStatus.offline')
 
@@ -289,6 +308,22 @@ function showLaunchFailure(title, desc){
     setOverlayHandler(null)
     toggleOverlay(true)
     toggleLaunchArea(false)
+}
+
+function isVersionOnlyServer(serv){
+    return serv != null && (serv.rawServer.versionOnly === true || serv.modules.length === 0)
+}
+
+function buildVanillaModManifest(versionData){
+    return {
+        id: versionData.id,
+        mainClass: versionData.mainClass,
+        arguments: {
+            jvm: [],
+            game: []
+        },
+        minecraftArguments: versionData.minecraftArguments || ''
+    }
 }
 
 /* System (Java) Scan */
@@ -445,6 +480,35 @@ const GAME_JOINED_REGEX = /\[.+\]: Sound engine started/
 const GAME_LAUNCH_REGEX = /^\[.+\]: (?:MinecraftForge .+ Initialized|ModLauncher .+ starting: .+|Loading Minecraft .+ with Fabric Loader .+)$/
 const MIN_LINGER = 5000
 
+async function validateAndDownloadVanillaAssets(mojangIndexProcessor){
+    await mojangIndexProcessor.init()
+    setLaunchDetails(Lang.queryJS('landing.dlAsync.validatingFileIntegrity'))
+    setLaunchPercentage(0)
+
+    const validation = await mojangIndexProcessor.validate(async () => {
+        setLaunchPercentage(100)
+    })
+
+    const assets = Object.values(validation).flatMap(v => v)
+    if(assets.length === 0){
+        return
+    }
+
+    setLaunchDetails(Lang.queryJS('landing.dlAsync.downloadingFiles'))
+    const expected = getExpectedDownloadSize(assets)
+    if(expected <= 0){
+        return
+    }
+
+    await downloadQueue(assets, received => {
+        const percent = Math.trunc((received / expected) * 100)
+        setDownloadPercentage(percent)
+    })
+
+    setDownloadPercentage(100)
+    await mojangIndexProcessor.postDownload()
+}
+
 async function dlAsync(login = true) {
 
     // Login parameter is temporary for debug purposes. Allows testing the validation/downloads without
@@ -478,78 +542,98 @@ async function dlAsync(login = true) {
     toggleLaunchArea(true)
     setLaunchPercentage(0, 100)
 
-    const fullRepairModule = new FullRepair(
-        ConfigManager.getCommonDirectory(),
-        ConfigManager.getInstanceDirectory(),
-        ConfigManager.getLauncherDirectory(),
-        ConfigManager.getSelectedServer(),
-        DistroAPI.isDevMode()
-    )
+    let versionData
+    let modLoaderData
 
-    fullRepairModule.spawnReceiver()
+    if(isVersionOnlyServer(serv)){
+        loggerLaunchSuite.info('Version-only mode detected. Downloading files from Mojang indexes.')
+        const mojangIndexProcessor = new MojangIndexProcessor(
+            ConfigManager.getCommonDirectory(),
+            serv.rawServer.minecraftVersion
+        )
 
-    fullRepairModule.childProcess.on('error', (err) => {
-        loggerLaunchSuite.error('Error during launch', err)
-        showLaunchFailure(Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'), err.message || Lang.queryJS('landing.dlAsync.errorDuringLaunchText'))
-    })
-    fullRepairModule.childProcess.on('close', (code, _signal) => {
-        if(code !== 0){
-            loggerLaunchSuite.error(`Full Repair Module exited with code ${code}, assuming error.`)
-            showLaunchFailure(Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'), Lang.queryJS('landing.dlAsync.seeConsoleForDetails'))
-        }
-    })
-
-    loggerLaunchSuite.info('Validating files.')
-    setLaunchDetails(Lang.queryJS('landing.dlAsync.validatingFileIntegrity'))
-    let invalidFileCount = 0
-    try {
-        invalidFileCount = await fullRepairModule.verifyFiles(percent => {
-            setLaunchPercentage(percent)
-        })
-        setLaunchPercentage(100)
-    } catch (err) {
-        loggerLaunchSuite.error('Error during file validation.')
-        showLaunchFailure(Lang.queryJS('landing.dlAsync.errorDuringFileVerificationTitle'), err.displayable || Lang.queryJS('landing.dlAsync.seeConsoleForDetails'))
-        return
-    }
-    
-
-    if(invalidFileCount > 0) {
-        loggerLaunchSuite.info('Downloading files.')
-        setLaunchDetails(Lang.queryJS('landing.dlAsync.downloadingFiles'))
-        setLaunchPercentage(0)
         try {
-            await fullRepairModule.download(percent => {
-                setDownloadPercentage(percent)
-            })
-            setDownloadPercentage(100)
-        } catch(err) {
-            loggerLaunchSuite.error('Error during file download.')
+            await validateAndDownloadVanillaAssets(mojangIndexProcessor)
+            versionData = await mojangIndexProcessor.getVersionJson()
+            modLoaderData = buildVanillaModManifest(versionData)
+        } catch (err) {
+            loggerLaunchSuite.error('Error during Mojang index validation/download.', err)
             showLaunchFailure(Lang.queryJS('landing.dlAsync.errorDuringFileDownloadTitle'), err.displayable || Lang.queryJS('landing.dlAsync.seeConsoleForDetails'))
             return
         }
     } else {
-        loggerLaunchSuite.info('No invalid files, skipping download.')
+        const fullRepairModule = new FullRepair(
+            ConfigManager.getCommonDirectory(),
+            ConfigManager.getInstanceDirectory(),
+            ConfigManager.getLauncherDirectory(),
+            ConfigManager.getSelectedServer(),
+            DistroAPI.isDevMode()
+        )
+
+        fullRepairModule.spawnReceiver()
+
+        fullRepairModule.childProcess.on('error', (err) => {
+            loggerLaunchSuite.error('Error during launch', err)
+            showLaunchFailure(Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'), err.message || Lang.queryJS('landing.dlAsync.errorDuringLaunchText'))
+        })
+        fullRepairModule.childProcess.on('close', (code, _signal) => {
+            if(code !== 0){
+                loggerLaunchSuite.error(`Full Repair Module exited with code ${code}, assuming error.`)
+                showLaunchFailure(Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'), Lang.queryJS('landing.dlAsync.seeConsoleForDetails'))
+            }
+        })
+
+        loggerLaunchSuite.info('Validating files.')
+        setLaunchDetails(Lang.queryJS('landing.dlAsync.validatingFileIntegrity'))
+        let invalidFileCount = 0
+        try {
+            invalidFileCount = await fullRepairModule.verifyFiles(percent => {
+                setLaunchPercentage(percent)
+            })
+            setLaunchPercentage(100)
+        } catch (err) {
+            loggerLaunchSuite.error('Error during file validation.')
+            showLaunchFailure(Lang.queryJS('landing.dlAsync.errorDuringFileVerificationTitle'), err.displayable || Lang.queryJS('landing.dlAsync.seeConsoleForDetails'))
+            return
+        }
+        
+
+        if(invalidFileCount > 0) {
+            loggerLaunchSuite.info('Downloading files.')
+            setLaunchDetails(Lang.queryJS('landing.dlAsync.downloadingFiles'))
+            setLaunchPercentage(0)
+            try {
+                await fullRepairModule.download(percent => {
+                    setDownloadPercentage(percent)
+                })
+                setDownloadPercentage(100)
+            } catch(err) {
+                loggerLaunchSuite.error('Error during file download.')
+                showLaunchFailure(Lang.queryJS('landing.dlAsync.errorDuringFileDownloadTitle'), err.displayable || Lang.queryJS('landing.dlAsync.seeConsoleForDetails'))
+                return
+            }
+        } else {
+            loggerLaunchSuite.info('No invalid files, skipping download.')
+        }
+
+        fullRepairModule.destroyReceiver()
+
+        const mojangIndexProcessor = new MojangIndexProcessor(
+            ConfigManager.getCommonDirectory(),
+            serv.rawServer.minecraftVersion)
+        const distributionIndexProcessor = new DistributionIndexProcessor(
+            ConfigManager.getCommonDirectory(),
+            distro,
+            serv.rawServer.id
+        )
+
+        modLoaderData = await distributionIndexProcessor.loadModLoaderVersionJson(serv)
+        versionData = await mojangIndexProcessor.getVersionJson()
     }
 
     // Remove download bar.
     remote.getCurrentWindow().setProgressBar(-1)
-
-    fullRepairModule.destroyReceiver()
-
     setLaunchDetails(Lang.queryJS('landing.dlAsync.preparingToLaunch'))
-
-    const mojangIndexProcessor = new MojangIndexProcessor(
-        ConfigManager.getCommonDirectory(),
-        serv.rawServer.minecraftVersion)
-    const distributionIndexProcessor = new DistributionIndexProcessor(
-        ConfigManager.getCommonDirectory(),
-        distro,
-        serv.rawServer.id
-    )
-
-    const modLoaderData = await distributionIndexProcessor.loadModLoaderVersionJson(serv)
-    const versionData = await mojangIndexProcessor.getVersionJson()
 
     if(login) {
         const authUser = ConfigManager.getSelectedAccount()

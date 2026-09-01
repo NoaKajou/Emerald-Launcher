@@ -30,32 +30,34 @@ LangLoader.setupLanguage()
  * @param {EmeraldDistribution} data 
  */
 function onDistroLoad(data){
-    if(data != null){
-        
-        // Resolve the selected server if its value has yet to be set.
-        if(ConfigManager.getSelectedServer() == null || data.getServerById(ConfigManager.getSelectedServer()) == null){
-            logger.info('Determining default selected server..')
-            ConfigManager.setSelectedServer(data.getMainServer().rawServer.id)
+    const resolvedData = data
+
+    if(resolvedData != null && ConfigManager.getSelectedServer() == null){
+        const mainServer = resolvedData.getMainServer()
+        if(mainServer != null){
+            ConfigManager.setSelectedServer(mainServer.rawServer.id)
             ConfigManager.save()
         }
     }
-    ipcRenderer.send('distributionIndexDone', data != null)
+
+    ipcRenderer.send('distributionIndexDone', resolvedData != null)
 }
 
-// Ensure Distribution is downloaded and cached.
-DistroAPI.getDistribution()
-    .then(heliosDistro => {
-        logger.info('Loaded distribution index.')
-
-        onDistroLoad(heliosDistro)
-    })
-    .catch(err => {
-        logger.info('Failed to load an older version of the distribution index.')
-        logger.info('Application cannot run.')
-        logger.error(err)
-
-        onDistroLoad(null)
-    })
+;(async () => {
+    try {
+        const distro = await DistroAPI.getDistribution()
+        DistroAPI.rawDistribution = distro.rawDistribution
+        DistroAPI.distribution = distro
+        setTimeout(() => {
+            onDistroLoad(distro)
+        }, 250)
+    } catch (err) {
+        logger.error('Failed to initialize default distribution.', err)
+        setTimeout(() => {
+            onDistroLoad(null)
+        }, 250)
+    }
+})()
 
 // Clean up temp dir incase previous launches ended unexpectedly. 
 fs.remove(path.join(os.tmpdir(), ConfigManager.getTempNativeFolder()), (err) => {

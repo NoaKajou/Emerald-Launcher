@@ -1316,6 +1316,37 @@ body, button {
     width: 75%;
     border-bottom: 1px solid rgba(255, 255, 255, 0.50);
 }
+#settingsGameVersionSelectorRow {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+}
+
+#settingsGameVersionSelectContainer {
+    width: 280px;
+}
+
+#settingsGameVersionOptions {
+    max-height: 260px;
+}
+
+#settingsGameVersionRefresh {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(126, 126, 126, 0.57);
+    border-radius: 3px;
+    color: #ffffff;
+    cursor: pointer;
+    font-size: 12px;
+    outline: none;
+    padding: 6px 12px;
+}
+
+#settingsGameVersionRefresh:hover,
+#settingsGameVersionRefresh:focus {
+    background: rgba(255, 255, 255, 0.15);
+}
+
 .settingsFieldLeft {
     display: flex;
     flex-direction: column;

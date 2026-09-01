@@ -3,11 +3,23 @@ const os     = require('os')
 const semver = require('semver')
 
 const DropinModUtil  = require('./assets/js/dropinmodutil')
+const { getMinecraftVersions } = require('./assets/js/mcversionmanager')
 const { MSFT_OPCODE, MSFT_REPLY_TYPE, MSFT_ERROR } = require('./assets/js/ipcconstants')
 
 const settingsState = {
     invalid: new Set()
 }
+
+const versionState = {
+    versions: [],
+    selected: null,
+    loaded: false
+}
+
+const settingsGameVersionSelected = document.getElementById('settingsGameVersionSelected')
+const settingsGameVersionOptions = document.getElementById('settingsGameVersionOptions')
+const settingsGameVersionMeta = document.getElementById('settingsGameVersionMeta')
+const settingsGameVersionRefresh = document.getElementById('settingsGameVersionRefresh')
 
 function bindSettingsSelect(){
     for(let ele of document.getElementsByClassName('settingsSelectContainer')) {
@@ -39,6 +51,110 @@ then close all select boxes: */
 document.addEventListener('click', closeSettingsSelect)
 
 bindSettingsSelect()
+
+function setGameVersionMeta(message){
+    if(settingsGameVersionMeta != null){
+        settingsGameVersionMeta.textContent = message
+    }
+}
+
+function formatVersionType(type){
+    if(type === 'release'){
+        return 'release'
+    }
+    if(type === 'snapshot'){
+        return 'snapshot'
+    }
+    return type
+}
+
+function markSelectedVersionOption(){
+    for(const option of settingsGameVersionOptions.children){
+        if(option.getAttribute('data-version') === versionState.selected){
+            option.setAttribute('selected', '')
+        } else {
+            option.removeAttribute('selected')
+        }
+    }
+}
+
+function setSelectedGameVersion(version, persist = true){
+    versionState.selected = version
+    const selectedOption = versionState.versions.find(v => v.id === version)
+    if(selectedOption != null){
+        settingsGameVersionSelected.textContent = `${selectedOption.id} (${formatVersionType(selectedOption.type)})`
+    } else {
+        settingsGameVersionSelected.textContent = version
+    }
+
+    markSelectedVersionOption()
+
+    if(persist){
+        ConfigManager.setGameVersion(version)
+        ConfigManager.save()
+    }
+}
+
+function populateGameVersionOptions(){
+    settingsGameVersionOptions.innerHTML = ''
+
+    for(const version of versionState.versions){
+        const option = document.createElement('div')
+        option.setAttribute('data-version', version.id)
+        option.textContent = `${version.id} (${formatVersionType(version.type)})`
+        option.onclick = async () => {
+            setSelectedGameVersion(version.id)
+            closeSettingsSelect(settingsGameVersionSelected)
+
+            try {
+                const distro = await DistroAPI.refreshDistributionOrFallback()
+                onDistroRefresh(distro)
+                setGameVersionMeta(`Version active: ${version.id}`)
+            } catch (err) {
+                console.error(err)
+                setGameVersionMeta('Version sauvegardee. Redemarre le launcher si necessaire.')
+            }
+        }
+        settingsGameVersionOptions.appendChild(option)
+    }
+}
+
+async function loadGameVersionOptions(forceRefresh = false){
+    settingsGameVersionRefresh.disabled = true
+    setGameVersionMeta('Chargement des versions Mojang...')
+
+    try {
+        const payload = await getMinecraftVersions(forceRefresh)
+        versionState.versions = payload.versions
+        versionState.loaded = true
+
+        if(versionState.versions.length === 0){
+            settingsGameVersionSelected.textContent = 'Aucune version trouvee'
+            setGameVersionMeta('Impossible de recuperer les versions.')
+            return
+        }
+
+        populateGameVersionOptions()
+
+        const preferred = ConfigManager.getGameVersion()
+        const latestRelease = payload.latest?.release || versionState.versions[0].id
+        const hasPreferred = versionState.versions.some(v => v.id === preferred)
+        setSelectedGameVersion(hasPreferred ? preferred : latestRelease, !hasPreferred)
+
+        const releaseCount = versionState.versions.filter(v => v.type === 'release').length
+        setGameVersionMeta(`${releaseCount} releases, ${versionState.versions.length} versions au total`)
+    } catch (err) {
+        console.error(err)
+        settingsGameVersionSelected.textContent = ConfigManager.getGameVersion()
+        setGameVersionMeta('Erreur reseau lors de la recuperation.')
+    } finally {
+        settingsGameVersionRefresh.disabled = false
+    }
+}
+
+settingsGameVersionRefresh.onclick = async () => {
+    await loadGameVersionOptions(true)
+}
 
 
 function bindFileSelectors(){
@@ -1570,8 +1686,12 @@ async function prepareSettings(first = false) {
         setupSettingsTabs()
         initSettingsValidators()
         prepareUpdateTab()
+        await loadGameVersionOptions()
     } else {
         await prepareModsTab()
+        if(!versionState.loaded){
+            await loadGameVersionOptions()
+        }
     }
     await initSettingsValues()
     prepareAccountsTab()

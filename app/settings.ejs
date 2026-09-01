@@ -82,6 +82,19 @@
                     <input type="number" id="settingsGameHeight" min="0" cValue="GameHeight">
                 </div>
             </div>
+            <div class="settingsFieldContainer" id="settingsGameVersionContainer">
+                <div class="settingsFieldLeft">
+                    <span class="settingsFieldTitle">Version Minecraft</span>
+                    <span class="settingsFieldDesc" id="settingsGameVersionMeta">Chargement des versions...</span>
+                </div>
+                <div class="settingsFieldRight" id="settingsGameVersionSelectorRow">
+                    <div class="settingsSelectContainer" id="settingsGameVersionSelectContainer">
+                        <div class="settingsSelectSelected" id="settingsGameVersionSelected">Chargement...</div>
+                        <div class="settingsSelectOptions" id="settingsGameVersionOptions" hidden></div>
+                    </div>
+                    <button id="settingsGameVersionRefresh">Actualiser</button>
+                </div>
+            </div>
             <div class="settingsFieldContainer">
                 <div class="settingsFieldLeft">
                     <span class="settingsFieldTitle"><%- lang('settings.launchFullscreenTitle') %></span>
